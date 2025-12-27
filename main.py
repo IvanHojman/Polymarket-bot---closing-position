@@ -1,19 +1,36 @@
 #!/usr/bin/env python3
+"""
+Polymarket Exit Monitor
+
+Monitors selected Polymarket outcome combinations and sends a Telegram
+alert when the sum of executable BID prices exceeds a threshold,
+indicating a favorable opportunity to SELL existing positions.
+
+Designed for traders who already hold positions.
+
+Author: Ivan Hojman
+"""
+
 import os
 import requests
 from dotenv import load_dotenv
 
+# Load .env locally (GitHub Actions will ignore this)
 load_dotenv()
 
 # ================= CONFIG =================
 
 ORDERBOOK_URL = "https://clob.polymarket.com/book"
+
+# Alert when bid_A + bid_B >= THRESHOLD
 THRESHOLD = 1.01
 
+# Telegram (from environment / GitHub secrets)
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-# Markets / token IDs
+# ================= MARKETS =================
+
 TOKENS = {
     "CUT25": {
         "YES": "92703761682322480664976766247614127878023988651992837287050266308961660624165",
@@ -34,6 +51,7 @@ TOKENS = {
 }
 
 # ===== CHOOSE POSITIONS YOU WANT TO SELL =====
+# (marketA, legA, marketB, legB)
 MONITORED_COMBOS = [
     ("CUT25", "YES", "CUTCUTPAUSE", "YES"),
     ("NOCHANGE", "YES", "CUTCUTCUT", "YES"),
@@ -58,11 +76,19 @@ def telegram_send(msg):
         "text": msg,
         "parse_mode": "HTML"
     }
-    requests.post(url, json=payload, timeout=6)
+
+    try:
+        requests.post(url, json=payload, timeout=6)
+    except Exception as e:
+        print("Telegram error:", e)
 
 def fetch_orderbook(token_id):
     try:
-        r = requests.get(ORDERBOOK_URL, params={"token_id": token_id}, timeout=6)
+        r = requests.get(
+            ORDERBOOK_URL,
+            params={"token_id": token_id},
+            timeout=6
+        )
         r.raise_for_status()
         return r.json()
     except Exception:
@@ -78,12 +104,13 @@ def best_bid(token_id):
         p = safe_float(b.get("price"))
         if p is not None and (best is None or p > best):
             best = p
+
     return best
 
-# ================= SELL SIGNAL =================
+# ================= CORE LOGIC =================
 
-def scan_exit_opportunity():
-    print("\n🔍 Checking SELL opportunities (using bids)\n")
+def scan_exit_opportunities():
+    print("\n🔍 Polymarket EXIT monitor (using bids)\n")
 
     for mktA, legA, mktB, legB in MONITORED_COMBOS:
         tA = TOKENS[mktA][legA]
@@ -112,13 +139,13 @@ def scan_exit_opportunity():
                 f"Consider selling both positions."
             )
             telegram_send(msg)
-            print("🚨 Exit alert sent")
+            print("🚨 Alert sent")
 
 # ================= MAIN =================
 
 if __name__ == "__main__":
     try:
-        scan_exit_opportunity()
+        scan_exit_opportunities()
     except Exception as e:
         telegram_send(f"❌ Exit monitor crashed:\n{e}")
         raise
